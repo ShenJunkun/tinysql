@@ -98,7 +98,32 @@ func DecodeRecordKey(key kv.Key) (tableID int64, handle int64, err error) {
 	 *   5. understanding the coding rules is a prerequisite for implementing this function,
 	 *      you can learn it in the projection 1-2 course documentation.
 	 */
-	return
+	if key == nil {
+		return 0, 0, errInvalidRecordKey.GenWithStack("")
+	}
+
+	if key[0] != 't' {
+		return 0, 0, errInvalidRecordKey.GenWithStack("")
+	}
+
+	next := key[1:]
+
+	next, tableID, err = codec.DecodeInt(next)
+	if err != nil {
+		return 0, 0, errInvalidRecordKey.GenWithStack("")
+	}
+
+	if string(next[0:2]) != "_r" {
+		return 0, 0, errInvalidRecordKey.GenWithStack("")
+	}
+	next = next[2:]
+
+	next, handle, err = codec.DecodeInt(next)
+	if err != nil {
+		return 0, 0, errInvalidRecordKey.GenWithStack("")
+	}
+
+	return tableID, handle, nil
 }
 
 // appendTableIndexPrefix appends table index prefix  "t[tableID]_i".
@@ -148,6 +173,34 @@ func DecodeIndexKeyPrefix(key kv.Key) (tableID int64, indexID int64, indexValues
 	 *   5. understanding the coding rules is a prerequisite for implementing this function,
 	 *      you can learn it in the projection 1-2 course documentation.
 	 */
+	
+	if key == nil {
+		return 0, 0, nil, errInvalidRecordKey.GenWithStack("")
+	}
+
+	if key[0] != 't' {
+		return 0, 0, nil, errInvalidRecordKey.GenWithStack("")
+	}
+
+	next := key[1:]
+
+	next, tableID, err = codec.DecodeInt(next)
+	if err != nil {
+		return 0, 0, nil, errInvalidRecordKey.GenWithStack("")
+	}
+
+	if string(next[0:2]) != "_i" {
+		return 0, 0, nil, errInvalidRecordKey.GenWithStack("")
+	}
+	next = next[2:]
+
+	next, indexID, err = codec.DecodeInt(next)
+	if err != nil {
+		return 0, 0, nil, errInvalidRecordKey.GenWithStack("")
+	}
+	
+	indexValues = next[ : ]
+	
 	return tableID, indexID, indexValues, nil
 }
 
