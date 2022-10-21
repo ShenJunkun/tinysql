@@ -15,6 +15,8 @@ package ddl
 
 import (
 	"fmt"
+	"sync/atomic"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/tidb/infoschema"
@@ -26,13 +28,12 @@ import (
 	"github.com/pingcap/tidb/util/logutil"
 	"github.com/pingcap/tidb/util/sqlexec"
 	"go.uber.org/zap"
-	"sync/atomic"
 )
 
 // adjustColumnInfoInAddColumn is used to set the correct position of column info when adding column.
-// 1. The added column was append at the end of tblInfo.Columns, due to ddl state was not public then.
-//    It should be moved to the correct position when the ddl state to be changed to public.
-// 2. The offset of column should also to be set to the right value.
+//  1. The added column was append at the end of tblInfo.Columns, due to ddl state was not public then.
+//     It should be moved to the correct position when the ddl state to be changed to public.
+//  2. The offset of column should also to be set to the right value.
 func adjustColumnInfoInAddColumn(tblInfo *model.TableInfo, offset int) {
 	oldCols := tblInfo.Columns
 	newCols := make([]*model.ColumnInfo, 0, len(oldCols))
@@ -196,16 +197,27 @@ func onAddColumn(d *ddlCtx, t *meta.Meta, job *model.Job) (ver int64, err error)
 	switch columnInfo.State {
 	case model.StateNone:
 		// To be filled
+		job.SchemaState = model.StateDeleteOnly
+		tblInfo.State = model.StateDeleteOnly
 		ver, err = updateVersionAndTableInfoWithCheck(t, job, tblInfo, originalState != columnInfo.State)
 	case model.StateDeleteOnly:
 		// To be filled
+		job.SchemaState = model.StateWriteOnly
+		tblInfo.State = model.StateWriteOnly
 		ver, err = updateVersionAndTableInfo(t, job, tblInfo, originalState != columnInfo.State)
 	case model.StateWriteOnly:
 		// To be filled
+		job.SchemaState = model.StateWriteReorganization
+		tblInfo.State = model.StateWriteReorganization
+		adjustColumnInfoInAddColumn(tblInfo, 0)
 		ver, err = updateVersionAndTableInfo(t, job, tblInfo, originalState != columnInfo.State)
 	case model.StateWriteReorganization:
 		// To be filled
+		job.SchemaState = model.StatePublic
+		tblInfo.State = model.StatePublic
+
 		ver, err = updateVersionAndTableInfo(t, job, tblInfo, originalState != columnInfo.State)
+		job.FinishTableJob(model.JobStateDone, model.StatePublic, ver, tblInfo)
 	default:
 		err = ErrInvalidDDLState.GenWithStackByArgs("column", columnInfo.State)
 	}
@@ -246,16 +258,27 @@ func onDropColumn(t *meta.Meta, job *model.Job) (ver int64, _ error) {
 	switch colInfo.State {
 	case model.StatePublic:
 		// To be filled
+		job.SchemaState = model.StateWriteOnly
+		tblInfo.State = model.StateWriteOnly
 		ver, err = updateVersionAndTableInfoWithCheck(t, job, tblInfo, originalState != colInfo.State)
 	case model.StateWriteOnly:
 		// To be filled
+		job.SchemaState = model.StateDeleteOnly
+		tblInfo.State = model.StateDeleteOnly
 		ver, err = updateVersionAndTableInfo(t, job, tblInfo, originalState != colInfo.State)
 	case model.StateDeleteOnly:
 		// To be filled
+		job.SchemaState = model.StateDeleteReorganization
+		tblInfo.State = model.StateDeleteReorganization
+		generateOriginDefaultValue()
+		adjustColumnInfoInDropColumn(tblInfo, )
 		ver, err = updateVersionAndTableInfo(t, job, tblInfo, originalState != colInfo.State)
 	case model.StateDeleteReorganization:
 		// To be filled
+		job.SchemaState = model.StatePublic
+		tblInfo.State = model.StatePublic
 		ver, err = updateVersionAndTableInfo(t, job, tblInfo, originalState != colInfo.State)
+		job.FinishTableJob(model.JobStateDone, model.StatePublic, ver, tblInfo)
 	default:
 		err = errInvalidDDLJob.GenWithStackByArgs("table", tblInfo.State)
 	}
